@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 )
 
 type Weapon string
+type Hero string
 
 const (
 	baseballBat Weapon = "baseball bat"
@@ -16,11 +16,22 @@ const (
 	machete     Weapon = "machete"
 )
 
-var heroes = map[Weapon]string{
-	baseballBat: "Tex Willer",
-	hatchet:     "Kit Carson",
-	scythe:      "Jack Tiger",
-	machete:     "Kit Willer",
+const (
+	tex     Hero = "Tex Willer"
+	kcarson Hero = "Kit Carson"
+	jack    Hero = "Jack Tiger"
+	kwiller Hero = "Kit Willer"
+)
+
+const (
+	timeout = 5 * time.Second
+)
+
+var heroes = map[Weapon]Hero{
+	baseballBat: tex,
+	hatchet:     kcarson,
+	scythe:      jack,
+	machete:     kwiller,
 }
 
 type Zombie struct {
@@ -29,6 +40,7 @@ type Zombie struct {
 }
 
 type ZombieChannel chan Zombie
+type HeroChannel chan Zombie
 
 func randomWeapon() Weapon {
 	switch rand.Intn(4) {
@@ -44,25 +56,30 @@ func randomWeapon() Weapon {
 	panic("Unexpected weapon index")
 }
 
-func makeZombie(id int) Zombie {
+func makeZombie(id int, prefix string) Zombie {
 	return Zombie{
-		fmt.Sprintf("zombie-%05d", id),
+		fmt.Sprintf("%s-%05d", prefix, id),
 		randomWeapon(),
 	}
 }
 
-func spawnZombies(zombieCh ZombieChannel, howMany int, wg *sync.WaitGroup) {
-	defer wg.Done()
+func delay(baseMs int, additionalMs int) {
+	time.Sleep(time.Duration(baseMs+rand.Intn(additionalMs)) * time.Millisecond)
+}
+
+func spawnZombies(howMany int, prefix string, zombieCh ZombieChannel) {
 	for i := 1; i <= howMany; i++ {
-		time.Sleep(150*time.Millisecond + time.Duration(rand.Intn(300))*time.Millisecond)
-		zombieCh <- makeZombie(i)
+		delay(150, 1000)
+		zombieCh <- makeZombie(i, prefix)
 	}
 	close(zombieCh)
 }
 
-func fightZombie(ok bool, origin string, z Zombie) {
+func fightZombie(ok bool, z Zombie, h Hero) {
 	if ok {
-		fmt.Printf("From: %s | Weapon: %s | Hero: %s\n", origin, z.weapon, heroes[z.weapon])
+		fmt.Printf("[FIGHT] %s confronts %s\n", h, z.name)
+		delay(250, 1500)
+		fmt.Printf(" [KILL] %s defeats %s\n", h, z.name)
 	}
 }
 
@@ -72,29 +89,86 @@ func main() {
 	eastCh := make(ZombieChannel)
 	westCh := make(ZombieChannel)
 
-	var wg sync.WaitGroup
+	texCh := make(HeroChannel, 3)
+	kcarsonCh := make(HeroChannel, 3)
+	jackCh := make(HeroChannel, 3)
+	kwillerCh := make(HeroChannel, 3)
 
-	go spawnZombies(northCh, 14, &wg)
-	go spawnZombies(southCh, 8, &wg)
-	go spawnZombies(eastCh, 10, &wg)
-	go spawnZombies(westCh, 12, &wg)
+	terminationCh := make(chan bool)
 
-	wg.Add(4)
+	var t0 = time.Now()
+
+	go spawnZombies(20, "N", northCh)
+	go spawnZombies(18, "S", southCh)
+	go spawnZombies(12, "E", eastCh)
+	go spawnZombies(22, "W", westCh)
 
 	go func() {
+		lastSpawn := time.Now()
 		for {
+			var z Zombie
+			var ok bool
 			select {
-			case z, ok := <-northCh:
-				fightZombie(ok, "north", z)
-			case z, ok := <-southCh:
-				fightZombie(ok, "south", z)
-			case z, ok := <-eastCh:
-				fightZombie(ok, "east", z)
-			case z, ok := <-westCh:
-				fightZombie(ok, "west", z)
+			case z, ok = <-northCh:
+			case z, ok = <-southCh:
+			case z, ok = <-eastCh:
+			case z, ok = <-westCh:
+			}
+			if ok {
+				fmt.Printf("[SPAWN] %s with a %s\n", z.name, z.weapon)
+				lastSpawn = time.Now()
+				switch heroes[z.weapon] {
+				case tex:
+					texCh <- z
+				case kcarson:
+					kcarsonCh <- z
+				case jack:
+					jackCh <- z
+				case kwiller:
+					kwillerCh <- z
+				}
+			}
+			if time.Since(lastSpawn) > timeout {
+				close(kwillerCh)
+				close(jackCh)
+				close(kcarsonCh)
+				close(texCh)
+				terminationCh <- true
+				return
 			}
 		}
 	}()
 
-	wg.Wait()
+	go func() {
+		for {
+			z, ok := <-texCh
+			fightZombie(ok, z, tex)
+		}
+	}()
+
+	go func() {
+		for {
+			z, ok := <-kcarsonCh
+			fightZombie(ok, z, kcarson)
+		}
+	}()
+
+	go func() {
+		for {
+			z, ok := <-jackCh
+			fightZombie(ok, z, jack)
+		}
+	}()
+
+	go func() {
+		for {
+			z, ok := <-kwillerCh
+			fightZombie(ok, z, kwiller)
+		}
+	}()
+
+	<-terminationCh
+
+	tn := time.Since(t0)
+	fmt.Printf("Outbreak lasted for %dms\n", tn.Milliseconds())
 }
