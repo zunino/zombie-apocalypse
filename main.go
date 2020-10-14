@@ -89,10 +89,10 @@ func main() {
 	eastCh := make(ZombieChannel)
 	westCh := make(ZombieChannel)
 
-	texCh := make(HeroChannel, 3)
-	kcarsonCh := make(HeroChannel, 3)
-	jackCh := make(HeroChannel, 3)
-	kwillerCh := make(HeroChannel, 3)
+	texCh := make(HeroChannel, 5)
+	kcarsonCh := make(HeroChannel, 5)
+	jackCh := make(HeroChannel, 5)
+	kwillerCh := make(HeroChannel, 5)
 
 	terminationCh := make(chan bool)
 
